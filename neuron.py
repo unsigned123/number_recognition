@@ -332,15 +332,14 @@ class ConvolutionLayer:
         # 如果前向传播有padding，裁剪掉padding部分
         if self.need_padding:
             dL_dX = dL_dX_padded[:, self.padding_size:-self.padding_size,
-                            self.padding_size:-self.padding_size, :] / self.batch_size
+                            self.padding_size:-self.padding_size, :]
         else:
-            dL_dX = dL_dX_padded / self.batch_size
+            dL_dX = dL_dX_padded
         dL_dK = np.einsum('abcd,ebcdfg->eafg', dL_dY, self.convolution_windows) / self.batch_size
 
         #最后计算dL_dB
         #dL/dY形状为(output_channel, output_size, output_size, batch_size)
-        #我们需要对
-        dL_dB = np.sum(dL_dY, axis=(1,2,3)) / self.batch_size
+        dL_dB = np.sum(dL_dY, axis=(1,2,3)).T / self.batch_size
 
         self.biases_loss_gradient = dL_dB
         self.kernel_loss_gradient = dL_dK
@@ -359,3 +358,92 @@ class ConvolutionLayer:
         self.forwarded = False
         self.backwarded = False
 
+class FlattenLayer:
+    def __init__(self, input_dimension: int,
+                 input_size: int,
+                 batch_size: int):
+        self.input_dimension = input_dimension
+        self.input_size = input_size
+        self.batch_size = batch_size
+
+    def forward(self, input_tensor: np.typing.NDArray):
+        #输入形状(input_dimension, input_size, input_size, batch_size)
+        #输出形状(input_dimension * input_size * input_size, batch_size)
+        return input_tensor.reshape(self.input_dimension * self.input_size * self.input_size, self.batch_size)
+    
+    def backward(self, upstream_loss_gradient: np.typing.NDArray):
+        return upstream_loss_gradient.reshape((self.input_dimension, self.input_size, self.input_size, self.batch_size))
+    
+    def update(self):
+        pass
+    
+class PoolingLayer:
+    def __init__(self, channel:int, input_size: int,
+                 window_size: int,
+                 rule: Literal['maximum', 'average'],
+                 batch_size: int):
+        #约定：输入的向量形状为(channel, input_size, input_size, batch_size)，池化层只操作1,2轴
+        self.channel = channel
+        self.input_size = input_size
+        self.window_size = window_size
+        self.output_size = input_size / window_size
+        self.rule = rule
+        self.batch_size = batch_size
+
+        self.forwarded = False
+        self.backwarded = False
+
+        self.windows = None
+        self.maximum_index =  None
+
+    def forward(self, input_tensor: np.typing.NDArray):
+        self.forwarded = True
+
+        windows = np.lib.stride_tricks.sliding_window_view(input_tensor, (self.window_size, self.window_size), axis=(1, 2))
+
+        self.windows = windows
+        #window大小(channel, output_size, output_size, batch_size, window_size, window_size)
+        if self.rule == 'average':
+            return np.copy(windows[:, ::self.window_size, ::self.window_size, :]).mean(axis=(4, 5))
+        
+        if self.rule == 'maximum':
+            copy = np.copy(windows[:, ::self.window_size, ::self.window_size, :])
+            self.maximum_index = copy.reshape(self.channel, self.output_size , self.output_size, self.batch_size, self.window_size * self.window_size).argmax(axis=-1)
+            return copy.max(axis=(4, 5))
+        
+    def backward(self, upstream_loss_gradient: np.typing.NDArray):
+        self.backwarded = True
+
+        if self.rule == 'maximum':
+            row_in_window = self.maximum_index // self.window_size
+            column_in_window = self.maximum_index % self.window_size
+
+            #计算每个输出位置对应的输入窗口起始坐标
+            #使用arange创建坐标网格
+            vertical_grid = np.arange(self.output_size)
+            horizonal_grid = np.arange(self.output_size)
+
+            vertical_start = vertical_grid[:, None] * self.window_size
+            horizonal_start = horizonal_grid * self.window_size
+
+            rows = vertical_start + row_in_window
+            columns = horizonal_start + column_in_window
+
+            #创建批次和通道索引数组
+            batch_index = np.arange(self.batch_size)[None, None, None, :]
+            channel_index = np.arange(self.channel)[:, None, None, None]
+
+            # 扩展维度以匹配空间维度
+            batch_index_expanded = np.broadcast_to(batch_index, (self.channel, self.output_size, self.output_size, self.batch_size))
+            channel_index_expanded = np.broadcast_to(channel_index, (self.channel, self.output_size, self.output_size, self.batch_size))
+
+            input_loss_gradient = np.zeros(shape=(self.channel, self.input_size, self.input_size, self.batch_size))
+            input_loss_gradient[channel_index_expanded, rows, columns, batch_index_expanded] = upstream_loss_gradient
+
+            return input_loss_gradient
+
+        if self.rule == 'average':
+            return np.repeat(upstream_loss_gradient, self.window_size, axis=1).repeat(self.window_size, axis=2) / (self.window_size ** 2)
+        
+    def update(self):
+        pass
