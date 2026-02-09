@@ -2,8 +2,19 @@ import numpy as np
 from typing import *
 import utils
 import math
+import abc
 
-class HiddenLayer:
+class Layer(abc.ABC):
+    def forward(self, input_vector: np.typing.NDArray):
+        pass
+
+    def backward(self, upstream_loss_gradient: np.typing.NDArray):
+        pass
+    
+    def update(self):
+        pass
+
+class HiddenLayer(Layer):
     def __init__(self, input_dimension: int, output_dimension: int, activation: Literal['sigmoid','relu','tanh','none'], 
                  initialization: Literal['kaiming_normal','xavier_normal'],
                  optimizer: utils.Optimizer,
@@ -161,7 +172,7 @@ class HiddenLayer:
         self.forwarded = False
         self.backwarded = False
 
-class ConvolutionLayer:
+class ConvolutionLayer(Layer):
     def __init__(self, input_channel: int, output_channel: int,
                  input_size: int, output_size: int, 
                  kernel_size :int, stride: int, need_padding: bool,
@@ -358,7 +369,7 @@ class ConvolutionLayer:
         self.forwarded = False
         self.backwarded = False
 
-class FlattenLayer:
+class FlattenLayer(Layer):
     def __init__(self, input_dimension: int,
                  input_size: int,
                  batch_size: int):
@@ -449,7 +460,7 @@ class PoolingLayer:
         self.forwarded = False
         self.backwarded = False
 
-class SoftmaxLayer:
+class SoftmaxLayer(Layer):
     def __init__(self, input_dimension: int,
                  batch_size: int):
         self.input_dimension = input_dimension
@@ -488,6 +499,7 @@ class SoftmaxLayer:
         self.backwarded = False
         self.forwarded = False
 
+#LossLayer是一种独立的Layer
 class LossLayer:
     def __init__(self, input_dimension: int,
                  batch_size: int,
@@ -537,11 +549,12 @@ class LossLayer:
             return -y / (p + self.eps) / self.batch_size
         elif self.reduction == 'sum':
             return -y / (p + self.eps)
+        
     def update(self):
         self.forwarded = False
         self.backwarded = False
         
-class DropoutLayer:
+class DropoutLayer(Layer):
     def __init__(self, dropout_probability: float):
         self.mode: Literal['training', 'reasoning'] = 'training'
 
