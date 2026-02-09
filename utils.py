@@ -13,6 +13,9 @@ def relu_vector(input_vector: np.typing.NDArray[np.float64]):
 def tanh_vector(input_vector: np.typing.NDArray[np.float64]):
     return (np.exp(input_vector) - np.exp(-input_vector)) / (np.exp(input_vector) + np.exp(-input_vector))
 
+def none_vector(input_vector: np.typing.NDArray[np.float64]):
+    return input_vector
+
 #激活函数的导数
 def sigmoid_derivative_vector(input_vector: None, output_vector: np.typing.NDArray[np.float64] | None):
     return output_vector * (1 - output_vector)
@@ -25,6 +28,9 @@ def relu_derivative_vector(input_vector: np.typing.NDArray[np.float64] | None, o
 
 def tanh_derivative_vector(input_vector: None, output_vector: np.typing.NDArray[np.float64] | None):
     return 1 - output_vector ** 2
+
+def none_derivative_vector(input_vector: None, output_vector: np.typing.NDArray[np.float64] | None):
+    return 1
 
 ####
 
@@ -46,8 +52,4 @@ class SGD(Optimizer):
     
     def get_new_biases(self, biases: np.typing.NDArray[np.float64], gradient: np.typing.NDArray[np.float64]):
         return biases - gradient * self.learning_rate
-    
-####
-
-def cross_entropy_loss(input_vector: np.typing.NDArray[np.float64]):
     

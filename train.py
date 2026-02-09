@@ -1,11 +1,10 @@
 from network import *
+import pickle
+from neuron import *
 
-if __name__ == '__main__':
-    batch_size = 16
-    learning_rate = 0.01
-
+def new_network():
     # 创建优化器
-    optimizer = utils.SGDOptimizer(learning_rate) 
+    optimizer = utils.SGD(learning_rate) 
 
     # 1. 卷积层1: 16个5×5滤波器，padding=2
     conv1 = ConvolutionLayer(
@@ -105,3 +104,22 @@ if __name__ == '__main__':
     layers = [conv1, pool1, conv2, pool2, flatten, fc1, dropout, fc2, softmax]
 
     model = Network(batch_size, layers)
+
+    return model
+
+if __name__ == '__main__':
+    batch_size = 16
+    learning_rate = 0.01
+
+    model = None
+
+    try:
+        with open('model.pkl', 'rb') as f:
+            model = pickle.load(f)
+        
+    except:
+        print('未检测到已训练模型，创建新模型')
+        with open('model.pkl', 'wb') as f:
+            model = new_network()
+            pickle.dump(model, f)
+        

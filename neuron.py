@@ -38,11 +38,11 @@ class HiddenLayer(Layer):
         activation_choices = {'sigmoid':utils.sigmoid_vector,
                               'relu':utils.relu_vector,
                               'tanh':utils.tanh_vector,
-                              'none':lambda input_vector:input_vector}
+                              'none':utils.none_vector}
         activation_derivative_choices = {'sigmoid':utils.sigmoid_derivative_vector,
                               'relu':utils.relu_derivative_vector,
                               'tanh':utils.tanh_derivative_vector,
-                              'none':lambda input_vector, output_vector:np.ones_like(input_vector)}
+                              'none':utils.none_derivative_vector}
         self.activation = activation_choices[activation]
         self.activation_derivative = activation_derivative_choices[activation]
 
@@ -204,11 +204,11 @@ class ConvolutionLayer(Layer):
         activation_choices = {'sigmoid':utils.sigmoid_vector,
                               'relu':utils.relu_vector,
                               'tanh':utils.tanh_vector,
-                              'none':lambda input_tensor:input_tensor}
+                              'none':utils.none_vector}
         activation_derivative_choices = {'sigmoid':utils.sigmoid_derivative_vector,
                               'relu':utils.relu_derivative_vector,
                               'tanh':utils.tanh_derivative_vector,
-                              'none':lambda input_tensor, output_tensor:np.ones_like(input_tensor)}
+                              'none':utils.none_derivative_vector}
         self.activation = activation_choices[activation]
         self.activation_derivative = activation_derivative_choices[activation]
 
