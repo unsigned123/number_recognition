@@ -101,7 +101,7 @@ def new_network():
     )
 
     # 组装模型
-    layers = [conv1, pool1, conv2, pool2, flatten, fc1, dropout, fc2, softmax]
+    layers = [conv1, pool1, conv2, pool2, flatten, fc1, dropout, fc2, softmax, loss_layer]
 
     model = Network(batch_size, layers)
 
