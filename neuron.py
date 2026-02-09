@@ -295,98 +295,46 @@ class ConvolutionLayer:
         dL_dY = dL_dZ * dZ_dY
 
         #传播过卷积层   
-        #计算X以K为核的卷积
-        #windows = np.lib.stride_tricks.sliding_window_view(X, (self.kernel_size, self.kernel_size), axis=(1, 2))
-        #windows = windows[:, ::self.stride, ::self.stride, :, :]
-        #这里可以直接提取windows
-        #self.convolution_windows
-
-        #注意，下面的操作如果使用卷积理解会非常复杂，可以考虑使用卷积的矩阵化（构造托普利兹矩阵）理解
-
-        #注意这里每个channel的卷积核都是不同的,einsum有点区别
-        #dL/dY形状为(output_channel, output_size, output_size, batch_size)
-        #X的形状为(input_channel, input_size, input_size, batch_size)
-        #dL/dK形状为(input_channel, output_channel, kernel_size, kernel_size, batch_size)
-        #这里要注意，由于Y中的每个元素都是yj = sigma wji*ki的形式（ki指的是kernel的元素，wji指的是某位置j的window的位置i）
-        #又存在关系dL/dK = dL/dY * dY/dK，而显然这个位置j的dYj/dK是一个形状与k相同，但是每个ki被填充上wji即X的对应部分的矩阵
-        #所以把所有位置j拼在一起，有高维张量dY/dK
-        #下面考虑简单情况，K是二维矩阵(k, k)，Y是二维矩阵(s, s)
-        #那么dY/dK是一个非常稀疏的四维张量，而dL/dY是一个二维张量
-        #而Y的轴将要被缩并，所以是对Y求和 -> sigma dYj/dk
-        #dL_dK = np.einsum('output_channel, output_h, output_w, batch, '
-        #         'input_channel, output_h, output_w, batch, kernel_h, kernel_w -> '
-        #         'input_channel, output_channel, kernel_h, kernel_w',
-        #         dL_dY, windows)
-
-        # 旋转卷积核180度（上下翻转、左右翻转）
-        kernel_rot180 = self.kernel[:, :, ::-1, ::-1]
+        # 直接方法计算dL/dX：对于每个输出位置的梯度，将其分配到对应的输入区域
+        dL_dX = np.zeros(self.input_shape)
         
-        # 计算转置卷积所需的填充
-        # 转置卷积的输出大小公式：output_size = (input_size - 1) * stride + kernel_size - 2 * padding
-        # 我们希望 output_size = self.input_size
-        # 所以 padding = (kernel_size - stride + (self.output_size - 1) * stride - self.input_size) / 2
-        
-        # 更简单的计算方法：
-        # 在前向传播中，输出大小计算公式：output_size = floor((input_size + 2*padding - kernel_size)/stride) + 1
-        # 在反向传播中，我们需要补零来恢复原始大小
-        # 如果步长>1，需要上采样dL_dY
-        if self.stride > 1:
-            # 创建上采样后的梯度张量
-            upsampled = (self.output_size - 1) * self.stride + 1
-            dL_dY_up = np.zeros((self.output_channel, upsampled, 
-                            upsampled, self.batch_size))
-            dL_dY_up[:, ::self.stride, ::self.stride, :] = dL_dY
+        if self.need_padding:
+            padded_input_shape = (self.input_channel, 
+                                self.input_size + 2*self.padding_size,
+                                self.input_size + 2*self.padding_size,
+                                self.batch_size)
+            dL_dX_padded = np.zeros(padded_input_shape)
         else:
-            dL_dY_up = dL_dY
-            upsampled = self.output_size
+            dL_dX_padded = dL_dX
         
-        # 计算输出填充（需要根据前向传播的填充调整）
-        # 前向传播: output_size = floor((input_size + 2*padding - kernel_size)/stride) + 1
-        # 反向传播: 我们需要计算转置卷积的输出大小
+        # 遍历所有输出位置
+        for h_out in range(self.output_size):
+            for w_out in range(self.output_size):
+                # 计算对应的输入区域
+                h_start = h_out * self.stride
+                w_start = w_out * self.stride
+                h_end = h_start + self.kernel_size
+                w_end = w_start + self.kernel_size
+                
+                # 获取当前输出位置对输入的梯度贡献
+                # dL_dY[:, h_out, w_out, :] 形状: (output_channel, batch_size)
+                # self.kernel 形状: (input_channel, output_channel, kernel_size, kernel_size)
+                
+                # 计算梯度贡献
+                grad_contrib = np.einsum('jb,ijkl->iklb', 
+                                    dL_dY[:, h_out, w_out, :],
+                                    self.kernel)
+                # 形状: (input_channel, kernel_size, kernel_size, batch_size)
+                
+                # 将贡献加到对应的输入区域
+                dL_dX_padded[:, h_start:h_end, w_start:w_end, :] += grad_contrib
         
-        # 简单方法：使用旋转180度的卷积核对上采样后的梯度进行卷积
-        # 旋转卷积核180度（沿最后两个维度）
-        kernel_rot180 = self.kernel[:, :, ::-1, ::-1]
-        
-        # 为转置卷积计算填充
-        # 在前向传播中，输出是通过输入与卷积核卷积得到的
-        # 在反向传播中，我们需要恢复输入大小
-        # 公式: output_size = (input_size - 1) * stride + kernel_size - 2 * padding
-        
-        # 计算需要的填充
-        total_padding = self.kernel_size - 1 + (self.input_size - upsampled)
-
-        pad_before = total_padding // 2
-        pad_after = total_padding - pad_before
-        # 对梯度进行填充
-        dL_dY_pad = np.pad(
-            dL_dY_up,
-            ((0, 0), (pad_before, pad_after), (pad_before, pad_after), (0, 0)),
-            mode='constant',
-            constant_values=0
-        )
-        
-        # 执行卷积
-        windows = np.lib.stride_tricks.sliding_window_view(
-            dL_dY_pad, 
-            (self.kernel_size, self.kernel_size), 
-            axis=(1, 2)
-        )
-        
-        # 步长为1（转置卷积时步长总为1）
-        windows = windows[:, ::1, ::1, :, :, :]
-        
-        # 计算dL/dX
-        # 注意：这里需要交换输入输出通道的维度顺序
-        # windows形状: (output_channel, output_h, output_w, batch_size, kernel_h, kernel_w)
-        # kernel_rot180形状: (input_channel, output_channel, kernel_h, kernel_w)
-        # 结果形状: (input_channel, output_h, output_w, batch_size)
-        dL_dX = np.einsum('ohwbkl,iokl->ihwb', windows, kernel_rot180)
-    
-        # 如果前向传播有填充，我们需要裁剪掉填充部分
-        if self.need_padding and self.padding_size > 0:
-            dL_dX = dL_dX[:, self.padding_size:-self.padding_size, 
-                        self.padding_size:-self.padding_size, :]
+        # 如果前向传播有padding，裁剪掉padding部分
+        if self.need_padding:
+            dL_dX = dL_dX_padded[:, self.padding_size:-self.padding_size,
+                            self.padding_size:-self.padding_size, :] / self.batch_size
+        else:
+            dL_dX = dL_dX_padded / self.batch_size
         dL_dK = np.einsum('abcd,ebcdfg->eafg', dL_dY, self.convolution_windows) / self.batch_size
 
         #最后计算dL_dB
