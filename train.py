@@ -4,8 +4,6 @@ if __name__ == '__main__':
     batch_size = 16
     learning_rate = 0.01
 
-    model = Network(batch_size)
-
     # 创建优化器
     optimizer = utils.SGDOptimizer(learning_rate) 
 
@@ -104,4 +102,6 @@ if __name__ == '__main__':
     )
 
     # 组装模型
-    model.layers = [conv1, pool1, conv2, pool2, flatten, fc1, dropout, fc2, softmax]
+    layers = [conv1, pool1, conv2, pool2, flatten, fc1, dropout, fc2, softmax]
+
+    model = Network(batch_size, layers)
