@@ -294,10 +294,7 @@ class ConvolutionLayer:
         #dL/dY与dL/dZ同形
         dL_dY = dL_dZ * dZ_dY
 
-        #传播过卷积层
-        #卷积层的反向传播本质上是再进行一次卷积，此时dL/dY成为新的卷积核，大小(output_channel, output_size, output_size, batch_size)
-        X = self.padded_input_tensor if self.need_padding else self.input_tensor
-        
+        #传播过卷积层   
         #计算X以K为核的卷积
         #windows = np.lib.stride_tricks.sliding_window_view(X, (self.kernel_size, self.kernel_size), axis=(1, 2))
         #windows = windows[:, ::self.stride, ::self.stride, :, :]
@@ -321,20 +318,10 @@ class ConvolutionLayer:
         #         'input_channel, output_channel, kernel_h, kernel_w',
         #         dL_dY, windows)
 
-        if self.stride > 1:
-            # 创建上采样后的张量，在元素之间插入0
-            upsampled_height = (self.output_size - 1) * self.stride + 1
-            upsampled_width = (self.output_size - 1) * self.stride + 1
-            dL_dY_up = np.zeros((self.output_channel, upsampled_height, 
-                            upsampled_width, self.batch_size))
-            dL_dY_up[:, ::self.stride, ::self.stride, :] = dL_dY
-        else:
-            dL_dY_up = dL_dY
-        
-        # 步骤2：旋转卷积核180度（上下翻转、左右翻转）
+        # 旋转卷积核180度（上下翻转、左右翻转）
         kernel_rot180 = self.kernel[:, :, ::-1, ::-1]
         
-        # 步骤3：计算转置卷积所需的填充
+        # 计算转置卷积所需的填充
         # 转置卷积的输出大小公式：output_size = (input_size - 1) * stride + kernel_size - 2 * padding
         # 我们希望 output_size = self.input_size
         # 所以 padding = (kernel_size - stride + (self.output_size - 1) * stride - self.input_size) / 2
@@ -371,7 +358,7 @@ class ConvolutionLayer:
 
         pad_before = total_padding // 2
         pad_after = total_padding - pad_before
-        # 步骤4：对梯度进行填充
+        # 对梯度进行填充
         dL_dY_pad = np.pad(
             dL_dY_up,
             ((0, 0), (pad_before, pad_after), (pad_before, pad_after), (0, 0)),
@@ -379,7 +366,7 @@ class ConvolutionLayer:
             constant_values=0
         )
         
-        # 步骤5：执行卷积
+        # 执行卷积
         windows = np.lib.stride_tricks.sliding_window_view(
             dL_dY_pad, 
             (self.kernel_size, self.kernel_size), 
