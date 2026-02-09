@@ -28,19 +28,19 @@ def tanh_derivative_vector(input_vector: None, output_vector: np.typing.NDArray[
 
 class Optimizer(ABC):
     @abstractmethod
-    def get_weights_delta(self, weights: np.typing.NDArray[np.float64], gradient: np.typing.NDArray[np.float64]):
+    def get_new_weights(self, weights: np.typing.NDArray[np.float64], gradient: np.typing.NDArray[np.float64]):
         pass
     
     @abstractmethod
-    def get_biases_delta(self, biases: np.typing.NDArray[np.float64], gradient: np.typing.NDArray[np.float64]):
+    def get_new_biases(self, biases: np.typing.NDArray[np.float64], gradient: np.typing.NDArray[np.float64]):
         pass
     
 class SGD(Optimizer):
     def __init__(self, learning_rate: int):
         self.learning_rate = learning_rate
 
-    def get_weights_delta(self, weights: np.typing.NDArray[np.float64], gradient: np.typing.NDArray[np.float64]):
+    def get_new_weights(self, weights: np.typing.NDArray[np.float64], gradient: np.typing.NDArray[np.float64]):
         return weights - gradient * self.learning_rate
     
-    def get_biases_delta(self, biases: np.typing.NDArray[np.float64], gradient: np.typing.NDArray[np.float64]):
+    def get_new_biases(self, biases: np.typing.NDArray[np.float64], gradient: np.typing.NDArray[np.float64]):
         return biases - gradient * self.learning_rate

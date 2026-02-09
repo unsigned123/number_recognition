@@ -76,6 +76,8 @@ class HiddenLayer:
         if input_vector.shape != self.input_shape:
             raise TypeError("输入向量大小有误！")
         
+        self.updated = False
+        
         x = input_vector
         W = self.weights
         b = self.biases
@@ -96,15 +98,19 @@ class HiddenLayer:
     
     #反向传播
     def backward(self, upstream_loss_gradient: np.typing.NDArray):
-        #不考虑batch时，dL_da大小是(output_dim, )
+        #不考虑batch时，dL_da大小是(output_dim, 1)
         #考虑batch时，dL_da大小是(output_dim, batch_size)
+        #da_dz是(output_dim, batch_size)
         dL_da = upstream_loss_gradient
-        da_dz = self.activation_derivative(self.input_vector, self.output_vector)
+        #注意第一个不是input_vector
+        da_dz = self.activation_derivative(self.unactivated_output_vector, self.output_vector)
         x = self.input_vector
         W = self.weights
 
         #传播过激活函数
-        dL_dz = da_dz * dL_da
+        #注意这里是标量乘法，挨个相乘，并不是矩阵乘法；如果一定要视为矩阵乘法，这个da/dz是对角阵，所以可以交换
+        #所以使用“*”
+        dL_dz = dL_da * da_dz
 
         #传播过线性函数
         #对偏置项梯度
@@ -147,8 +153,274 @@ class HiddenLayer:
     
     #更新权重与偏置项
     def update(self):
-        self.weights = self.optimizer.get_weights_delta(self.weights, self.weights_loss_gradient)
-        self.biases = self.optimizer.get_biases_delta(self.weights, self.weights_loss_gradient)
+        self.updated = True
+
+        self.weights = self.optimizer.get_new_weights(self.weights, self.weights_loss_gradient)
+        self.biases = self.optimizer.get_new_biases(self.biases, self.biases_loss_gradient)
 
         self.forwarded = False
         self.backwarded = False
+
+class ConvolutionLayer:
+    def __init__(self, input_channel: int, output_channel: int,
+                 input_size: int, output_size: int, 
+                 kernel_size :int, stride: int, need_padding: bool,
+                 padding_size :int,
+                 activation: Literal['sigmoid','relu','tanh','none'], 
+                 initialization: Literal['kaiming_normal','xavier_normal'],
+                 optimizer: utils.Optimizer,
+                 batch_size: int):
+        #基本信息
+        self.input_channel = input_channel
+        self.output_channel = output_channel
+        self.batch_size = batch_size
+        self.kernel_size = kernel_size
+        self.input_size = input_size
+        self.output_size = output_size
+
+        self.stride = stride
+        self.need_padding = need_padding
+        self.padding_size = padding_size
+
+        #卷积核的形状是(input_channel, output_channel, kernel_size, kernel_size)
+        #偏置的形状是(output_channel, 1)
+        #输入的形状是(input_channel, input_size, input_size, batch_size)
+        self.kernel_shape = (input_channel, output_channel, kernel_size, kernel_size)
+        self.biases_shape = (output_channel, 1)
+        self.input_shape = (input_channel, input_size, input_size, batch_size)
+
+        #激活函数及其导函数
+        activation_choices = {'sigmoid':utils.sigmoid_vector,
+                              'relu':utils.relu_vector,
+                              'tanh':utils.tanh_vector,
+                              'none':lambda input_tensor:input_tensor}
+        activation_derivative_choices = {'sigmoid':utils.sigmoid_derivative_vector,
+                              'relu':utils.relu_derivative_vector,
+                              'tanh':utils.tanh_derivative_vector,
+                              'none':lambda input_tensor, output_tensor:np.ones_like(input_tensor)}
+        self.activation = activation_choices[activation]
+        self.activation_derivative = activation_derivative_choices[activation]
+
+        #初始化
+        #初始化卷积核
+        if initialization == 'kaiming_normal':
+            self.kernel = np.random.normal(0, math.sqrt(2 / input_channel), self.kernel_shape)
+        elif initialization == 'xavier_normal':
+            self.kernel = np.random.normal(0, math.sqrt(2 / (input_channel + output_channel)), self.kernel_shape)
+            xavier_adjust = {'sigmoid':1,
+                             'relu':math.sqrt(2),
+                             'tanh':4}
+            self.kernel *= xavier_adjust[activation]
+        #初始化偏置项
+        self.biases = np.zeros(self.biases_shape)
+
+        #状态标志位与状态存储
+        #是否已传播与更新
+        self.forwarded = False
+        self.backwarded = False
+        self.updated = False
+        #前向传播状态
+        self.input_tensor = None
+        self.padded_input_tensor = None
+        self.output_tensor = None
+        self.unactivated_output_tensor = None
+        #加速卷积计算
+        self.convolution_windows = None
+        #反向传播状态
+        #包含所有batch_size个output_size维梯度向量
+        self.upstream_loss_gradient = None
+        self.input_tensor_loss_gradient = None
+        #只包含平均梯度
+        #张量
+        self.kernel_loss_gradient = None
+        #梯度张量
+        self.biases_loss_gradient = None
+
+        #优化器
+        self.optimizer = optimizer
+
+    #前向传播
+    def forward(self, input_tensor: np.typing.NDArray):
+        padded_input_tensor = None
+        if self.need_padding:
+            padded_input_tensor = np.pad(input_tensor, ((0, 0), (self.padding_size, self.padding_size), (self.padding_size, self.padding_size)) ,mode='constant', constant_values=0)
+        
+        self.input_tensor = input_tensor
+
+        self.updated = False
+
+        #input_tensord的形状为(input_channel, padded_input_size, padded_input_size, batch_size)，因此我们选择轴1, 2
+        windows = np.lib.stride_tricks.sliding_window_view(padded_input_tensor
+                                                           if self.need_padding
+                                                           else input_tensor, (self.kernel_size, self.kernel_size), axis=(1, 2))
+        #进行stride切片，显然我们只想要在轴1, 2上以self.stride为步长进行卷积；windows多了2个维度加在最后
+        #现在，windows的轴1和轴2被修剪为output_size，output_size（即窗口个数），后面加了两个窗口维度，它们的大小为(kernel_size, kernel_size)
+        windows = windows[:, ::self.stride, ::self.stride, :, :]
+
+        self.convolution_windows = windows
+
+        #计算卷积
+        #windows的形状为(input_channel, output_size, output_size, batch_size, kernel_size, kernel_size)，kernel的形状为(input_channel, output_channel, kernel_size, kernel_size)
+        # i: input_channel
+        # h: output_height
+        # w: output_width
+        # b: batch_size
+        # k: kernel_height
+        # l: kernel_width
+        # j: output_channel
+        #输出形状为(output_channel, output_size, output_size, batch_size)
+        convolution = np.einsum('ihwbkl,ijkl->jhwb', windows, self.kernel)
+
+        self.unactivated_output_tensor = convolution + self.biases
+        self.output_tensor = self.activation(self.unactivated_output_tensor)
+        self.padded_input_tensor = padded_input_tensor
+
+        self.forwarded = True
+
+        return self.output_tensor
+    
+    #反向传播
+    def backward(self, upstream_loss_gradient: np.typing.NDArray):
+        #先计算对卷积核的梯度dL/dK
+        
+        #首先，上游的梯度是对于激活后输出Z的梯度dL/dZ，应当先把它转化为dL/dY，Y是激活前输出
+        #dL/dZ,dL/dY的形状均为(output_channel, output_size, output_size, batch_size)，与Z,Y同形
+        dL_dZ = upstream_loss_gradient
+        dZ_dY = self.activation_derivative(self.unactivated_output_tensor, self.output_tensor)
+
+        #传播过激活函数
+        #dL/dY = dL/dZ * dZ/dY -> 注意链式法则右边顺序！
+        #由于激活函数是逐个操作的，这里依旧可以把dZ/dY视作对角阵，两个张量的元素依旧可以对应相乘（而不是矩阵乘法）
+        #dL/dY与dL/dZ同形
+        dL_dY = dL_dZ * dZ_dY
+
+        #传播过卷积层
+        #卷积层的反向传播本质上是再进行一次卷积，此时dL/dY成为新的卷积核，大小(output_channel, output_size, output_size, batch_size)
+        X = self.padded_input_tensor if self.need_padding else self.input_tensor
+        
+        #计算X以K为核的卷积
+        #windows = np.lib.stride_tricks.sliding_window_view(X, (self.kernel_size, self.kernel_size), axis=(1, 2))
+        #windows = windows[:, ::self.stride, ::self.stride, :, :]
+        #这里可以直接提取windows
+        #self.convolution_windows
+
+        #注意，下面的操作如果使用卷积理解会非常复杂，可以考虑使用卷积的矩阵化（构造托普利兹矩阵）理解
+
+        #注意这里每个channel的卷积核都是不同的,einsum有点区别
+        #dL/dY形状为(output_channel, output_size, output_size, batch_size)
+        #X的形状为(input_channel, input_size, input_size, batch_size)
+        #dL/dK形状为(input_channel, output_channel, kernel_size, kernel_size, batch_size)
+        #这里要注意，由于Y中的每个元素都是yj = sigma wji*ki的形式（ki指的是kernel的元素，wji指的是某位置j的window的位置i）
+        #又存在关系dL/dK = dL/dY * dY/dK，而显然这个位置j的dYj/dK是一个形状与k相同，但是每个ki被填充上wji即X的对应部分的矩阵
+        #所以把所有位置j拼在一起，有高维张量dY/dK
+        #下面考虑简单情况，K是二维矩阵(k, k)，Y是二维矩阵(s, s)
+        #那么dY/dK是一个非常稀疏的四维张量，而dL/dY是一个二维张量
+        #而Y的轴将要被缩并，所以是对Y求和 -> sigma dYj/dk
+        #dL_dK = np.einsum('output_channel, output_h, output_w, batch, '
+        #         'input_channel, output_h, output_w, batch, kernel_h, kernel_w -> '
+        #         'input_channel, output_channel, kernel_h, kernel_w',
+        #         dL_dY, windows)
+
+        if self.stride > 1:
+            # 创建上采样后的张量，在元素之间插入0
+            upsampled_height = (self.output_size - 1) * self.stride + 1
+            upsampled_width = (self.output_size - 1) * self.stride + 1
+            dL_dY_up = np.zeros((self.output_channel, upsampled_height, 
+                            upsampled_width, self.batch_size))
+            dL_dY_up[:, ::self.stride, ::self.stride, :] = dL_dY
+        else:
+            dL_dY_up = dL_dY
+        
+        # 步骤2：旋转卷积核180度（上下翻转、左右翻转）
+        kernel_rot180 = self.kernel[:, :, ::-1, ::-1]
+        
+        # 步骤3：计算转置卷积所需的填充
+        # 转置卷积的输出大小公式：output_size = (input_size - 1) * stride + kernel_size - 2 * padding
+        # 我们希望 output_size = self.input_size
+        # 所以 padding = (kernel_size - stride + (self.output_size - 1) * stride - self.input_size) / 2
+        
+        # 更简单的计算方法：
+        # 在前向传播中，输出大小计算公式：output_size = floor((input_size + 2*padding - kernel_size)/stride) + 1
+        # 在反向传播中，我们需要补零来恢复原始大小
+        # 如果步长>1，需要上采样dL_dY
+        if self.stride > 1:
+            # 创建上采样后的梯度张量
+            upsampled = (self.output_size - 1) * self.stride + 1
+            dL_dY_up = np.zeros((self.output_channel, upsampled, 
+                            upsampled, self.batch_size))
+            dL_dY_up[:, ::self.stride, ::self.stride, :] = dL_dY
+        else:
+            dL_dY_up = dL_dY
+            upsampled = self.output_size
+        
+        # 计算输出填充（需要根据前向传播的填充调整）
+        # 前向传播: output_size = floor((input_size + 2*padding - kernel_size)/stride) + 1
+        # 反向传播: 我们需要计算转置卷积的输出大小
+        
+        # 简单方法：使用旋转180度的卷积核对上采样后的梯度进行卷积
+        # 旋转卷积核180度（沿最后两个维度）
+        kernel_rot180 = self.kernel[:, :, ::-1, ::-1]
+        
+        # 为转置卷积计算填充
+        # 在前向传播中，输出是通过输入与卷积核卷积得到的
+        # 在反向传播中，我们需要恢复输入大小
+        # 公式: output_size = (input_size - 1) * stride + kernel_size - 2 * padding
+        
+        # 计算需要的填充
+        total_padding = self.kernel_size - 1 + (self.input_size - upsampled)
+
+        pad_before = total_padding // 2
+        pad_after = total_padding - pad_before
+        # 步骤4：对梯度进行填充
+        dL_dY_pad = np.pad(
+            dL_dY_up,
+            ((0, 0), (pad_before, pad_after), (pad_before, pad_after), (0, 0)),
+            mode='constant',
+            constant_values=0
+        )
+        
+        # 步骤5：执行卷积
+        windows = np.lib.stride_tricks.sliding_window_view(
+            dL_dY_pad, 
+            (self.kernel_size, self.kernel_size), 
+            axis=(1, 2)
+        )
+        
+        # 步长为1（转置卷积时步长总为1）
+        windows = windows[:, ::1, ::1, :, :, :]
+        
+        # 计算dL/dX
+        # 注意：这里需要交换输入输出通道的维度顺序
+        # windows形状: (output_channel, output_h, output_w, batch_size, kernel_h, kernel_w)
+        # kernel_rot180形状: (input_channel, output_channel, kernel_h, kernel_w)
+        # 结果形状: (input_channel, output_h, output_w, batch_size)
+        dL_dX = np.einsum('ohwbkl,iokl->ihwb', windows, kernel_rot180)
+    
+        # 如果前向传播有填充，我们需要裁剪掉填充部分
+        if self.need_padding and self.padding_size > 0:
+            dL_dX = dL_dX[:, self.padding_size:-self.padding_size, 
+                        self.padding_size:-self.padding_size, :]
+        dL_dK = np.einsum('abcd,ebcdfg->eafg', dL_dY, self.convolution_windows) / self.batch_size
+
+        #最后计算dL_dB
+        #dL/dY形状为(output_channel, output_size, output_size, batch_size)
+        #我们需要对
+        dL_dB = np.sum(dL_dY, axis=(1,2,3)) / self.batch_size
+
+        self.biases_loss_gradient = dL_dB
+        self.kernel_loss_gradient = dL_dK
+        self.input_tensor_loss_gradient = dL_dX
+
+        self.backwarded = True
+
+        return dL_dX
+    
+    def update(self):
+        self.updated = True
+
+        self.kernel = self.optimizer.get_new_weights(self.kernel, self.kernel_loss_gradient)
+        self.biases = self.optimizer.get_new_biases(self.biases, self.biases_loss_gradient)
+
+        self.forwarded = False
+        self.backwarded = False
+
