@@ -26,6 +26,8 @@ def relu_derivative_vector(input_vector: np.typing.NDArray[np.float64] | None, o
 def tanh_derivative_vector(input_vector: None, output_vector: np.typing.NDArray[np.float64] | None):
     return 1 - output_vector ** 2
 
+####
+
 class Optimizer(ABC):
     @abstractmethod
     def get_new_weights(self, weights: np.typing.NDArray[np.float64], gradient: np.typing.NDArray[np.float64]):
@@ -44,3 +46,8 @@ class SGD(Optimizer):
     
     def get_new_biases(self, biases: np.typing.NDArray[np.float64], gradient: np.typing.NDArray[np.float64]):
         return biases - gradient * self.learning_rate
+    
+####
+
+def cross_entropy_loss(input_vector: np.typing.NDArray[np.float64]):
+    

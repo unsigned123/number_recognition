@@ -378,7 +378,7 @@ class FlattenLayer:
         pass
     
 class PoolingLayer:
-    def __init__(self, channel:int, input_size: int,
+    def __init__(self, channel: int, input_size: int,
                  window_size: int,
                  rule: Literal['maximum', 'average'],
                  batch_size: int):
@@ -446,4 +446,132 @@ class PoolingLayer:
             return np.repeat(upstream_loss_gradient, self.window_size, axis=1).repeat(self.window_size, axis=2) / (self.window_size ** 2)
         
     def update(self):
-        pass
+        self.forwarded = False
+        self.backwarded = False
+
+class SoftmaxLayer:
+    def __init__(self, input_dimension: int,
+                 batch_size: int):
+        self.input_dimension = input_dimension
+        self.batch_size = batch_size
+
+        self.output = None
+
+        self.forwarded = False
+        self.backwarded = False
+
+    def forward(self, input_vector: np.typing.NDArray):
+        self.forwarded = True
+
+        #keepdim!
+        z = np.max(input_vector, axis=0, keepdims=True)
+
+        self.output = np.exp(input_vector - z) / np.sum(np.exp(input_vector - z), axis=0, keepdims=True)
+
+        return self.output
+
+    def backward(self, upstream_loss_gradient: np.typing.NDArray):
+        #a = softmax(z)
+        self.backwarded = True
+        dL_da = upstream_loss_gradient
+        a = self.output
+
+        #对每个向量进行点积
+        #a -> (input_size, batch_size)
+        #dL_da -> (input_size, batch_size)
+        weighted_sum = np.sum(a * dL_da, axis=0, keepdims=True)  # 形状: (1, batch_size)
+        dL_dz = a * (dL_da - weighted_sum)
+
+        return dL_dz
+    
+    def update(self):
+        self.backwarded = False
+        self.forwarded = False
+
+class LossLayer:
+    def __init__(self, input_dimension: int,
+                 batch_size: int,
+                 loss_type: Literal['cross_entropy'],
+                 reduction: Literal['average', 'sum'],
+                 eps: float = 1e-8):
+        self.input_dimension = input_dimension
+        self.batch_size = batch_size
+
+        self.input_vector = None
+        self.one_hot_vector = None
+
+        self.loss_type = loss_type
+        self.loss = None
+
+        self.forwarded = False
+        self.backwarded = False
+
+        self.reduction = reduction
+
+        self.eps = eps
+
+    def forward(self, input_vector: np.typing.NDArray, one_hot_vector: np.typing.NDArray):
+        #目前只支持cross entropy
+        #one_hot_vector的大小为(input_dimension, batch_size)
+        self.forwarded = True
+
+        y = one_hot_vector
+        p = input_vector
+
+        self.input_vector = input_vector
+        self.one_hot_vector = one_hot_vector
+        
+        if self.reduction == 'average':
+            self.loss = np.mean(-np.sum(y * np.log(p + self.eps), axis=0))
+        elif self.reduction == 'sum':
+            self.loss = np.sum(-np.sum(y * np.log(p + self.eps), axis=0))
+        return self.loss
+    
+    def backward(self):
+        self.backwarded = True
+
+        y = self.one_hot_vector
+        p = self.input_vector
+
+        if self.reduction == 'average':
+            return -y / (p + self.eps) / self.batch_size
+        elif self.reduction == 'sum':
+            return -y / (p + self.eps)
+    def update(self):
+        self.forwarded = False
+        self.backwarded = False
+        
+class DropoutLayer:
+    def __init__(self, dropout_probability: float):
+        self.mode: Literal['training', 'reasoning'] = 'training'
+
+        self.dropout_probability = dropout_probability
+        self.dropout_map = None
+        
+        self.forwarded = False
+        self.backwarded = False
+
+    def switch(self, mode: Literal['training', 'reasoning']):
+        self.mode = mode
+
+    def forward(self, input_tensor: np.typing.NDArray):
+        self.forwarded = True
+        if self.mode == 'training':
+            p = self.dropout_probability
+            self.dropout_map = np.random.choice([0, 1], size=input_tensor.shape, p=[p, 1-p])
+
+            return input_tensor * self.dropout_map / (1 - p)
+        elif self.mode == 'reasoning':
+            return input_tensor
+
+    def backward(self, upstream_loss_gradient: np.typing.NDArray):
+        self.backwarded = True
+        if self.mode == 'training':
+            p = self.dropout_probability
+            return upstream_loss_gradient * self.dropout_map / (1 - p)
+        elif self.mode == 'reasoning':
+            return upstream_loss_gradient
+        
+    def update(self):
+        self.forwarded = False
+        self.backwarded = False
