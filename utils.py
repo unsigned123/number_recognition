@@ -135,7 +135,7 @@ class AdaGrad(Optimizer):
         return result
     
 class Adam(Optimizer):
-    def __init__(self, learning_rate: float, momentum_attenuation: float = 0.99, learning_rate_attenuation: float = 0.99,
+    def __init__(self, learning_rate: float, momentum_attenuation: float = 0.99, learning_rate_attenuation: float = 0.999,
                  eps: float = 1e-8):
         self.learning_rate = learning_rate
         #beta_1

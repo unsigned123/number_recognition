@@ -5,12 +5,9 @@ import gzip
 import struct
 
 batch_size = 16
-learning_rate = 0.001
+learning_rate = 3e-4
 
 def new_network():
-    # 创建优化器
-    optimizer = utils.SGD(learning_rate) 
-
     # 1. 卷积层1: 16个5×5滤波器，padding=2
     conv1 = ConvolutionLayer(
         input_channel=1,
@@ -23,7 +20,7 @@ def new_network():
         padding_size=2,
         activation='relu',
         initialization='kaiming_normal',
-        optimizer=optimizer,
+        optimizer=utils.Adam(learning_rate),
         batch_size=batch_size
     )
 
@@ -48,7 +45,7 @@ def new_network():
         padding_size=1,
         activation='relu',
         initialization='kaiming_normal',
-        optimizer=optimizer,
+        optimizer=utils.Adam(learning_rate),
         batch_size=batch_size
     )
 
@@ -74,7 +71,7 @@ def new_network():
         output_dimension=128,
         activation='relu',
         initialization='kaiming_normal',
-        optimizer=optimizer,
+        optimizer=utils.Adam(learning_rate),
         batch_size=batch_size
     )
 
@@ -87,7 +84,7 @@ def new_network():
         output_dimension=10,
         activation='none',  # 无激活函数
         initialization='kaiming_normal',
-        optimizer=optimizer,
+        optimizer=utils.Adam(learning_rate),
         batch_size=batch_size
     )
 
@@ -142,7 +139,6 @@ def load_label(filename: str):
 
 model: Network = None
 def train():
-
     try:
         with open('model.pkl', 'rb') as f:
             model = pickle.load(f)
@@ -153,12 +149,12 @@ def train():
             model = new_network()
             pickle.dump(model, f)
 
-    for each in model.layers:
+    '''for each in model.layers:
         try:
             each.optimizer.learning_rate = learning_rate
             print('changed')
         except:
-            pass
+            pass'''
     model.layers[6].mode = 'training'
     images = load_dataset('mnist/train-images-idx3-ubyte.gz')
     labels = load_label('mnist/train-labels-idx1-ubyte.gz')
@@ -231,4 +227,4 @@ def reason():
         print(f'推理准确率{total_correct / total_checked}')
 
 
-reason()
+train()
