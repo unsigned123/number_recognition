@@ -306,13 +306,13 @@ class ConvolutionLayer(Layer):
         dL_dY = dL_dZ * dZ_dY
 
         #传播过卷积层   
-        # 直接方法计算dL/dX：对于每个输出位置的梯度，将其分配到对应的输入区域
+        #直接方法计算dL/dX：对于每个输出位置的梯度，将其分配到对应的输入区域
         dL_dX = np.zeros(self.input_shape)
         
         if self.need_padding:
             padded_input_shape = (self.input_channel, 
-                                self.input_size + 2*self.padding_size,
-                                self.input_size + 2*self.padding_size,
+                                self.input_size + 2 * self.padding_size,
+                                self.input_size + 2 * self.padding_size,
                                 self.batch_size)
             dL_dX_padded = np.zeros(padded_input_shape)
         else:
@@ -350,7 +350,7 @@ class ConvolutionLayer(Layer):
 
         #最后计算dL_dB
         #dL/dY形状为(output_channel, output_size, output_size, batch_size)
-        dL_dB = (np.sum(dL_dY, axis=(1,2,3)).T / self.batch_size)[:, None]
+        dL_dB = (np.sum(dL_dY, axis=(1, 2, 3)).T / self.batch_size)[:, None]
 
         self.biases_loss_gradient = dL_dB
         self.kernel_loss_gradient = dL_dK
@@ -420,7 +420,7 @@ class PoolingLayer(Layer):
         
         if self.rule == 'maximum':
             copy = np.copy(windows[:, ::self.window_size, ::self.window_size, :])
-            self.maximum_index = copy.reshape(self.channel, self.output_size , self.output_size, self.batch_size, self.window_size * self.window_size).argmax(axis=-1)
+            self.maximum_index = copy.reshape(self.channel, self.output_size, self.output_size, self.batch_size, self.window_size * self.window_size).argmax(axis=-1)
             return copy.max(axis=(4, 5))
         
     def backward(self, upstream_loss_gradient: np.typing.NDArray):
