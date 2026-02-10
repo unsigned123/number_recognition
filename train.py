@@ -4,6 +4,8 @@ from neuron import *
 import gzip
 import struct
 
+batch_size = 16
+learning_rate = 0.001
 
 def new_network():
     # 创建优化器
@@ -138,23 +140,26 @@ def load_label(filename: str):
         
     return labels
 
-if __name__ == '__main__':
-    batch_size = 16
-    learning_rate = 0.01
-
-    model: Network = None
+model: Network = None
+def train():
 
     try:
         with open('model.pkl', 'rb') as f:
             model = pickle.load(f)
-            raise BaseException
         
     except:
         print('未检测到已训练模型，创建新模型')
         with open('model.pkl', 'wb') as f:
             model = new_network()
             pickle.dump(model, f)
-        
+
+    for each in model.layers:
+        try:
+            each.optimizer.learning_rate = learning_rate
+            print('changed')
+        except:
+            pass
+    model.layers[6].mode = 'training'
     images = load_dataset('mnist/train-images-idx3-ubyte.gz')
     labels = load_label('mnist/train-labels-idx1-ubyte.gz')
 
@@ -184,3 +189,46 @@ if __name__ == '__main__':
         exit(0)
 
     print(f'共{epoches}轮训练完毕!目前loss={model.loss}')
+
+def reason():
+
+    try:
+        with open('model.pkl', 'rb') as f:
+            model = pickle.load(f)
+        
+    except:
+        print('未检测到已训练模型，创建新模型')
+        with open('model.pkl', 'wb') as f:
+            model = new_network()
+            pickle.dump(model, f)
+    model.layers[6].mode = 'reasoning'
+
+    images = load_dataset('mnist/t10k-images-idx3-ubyte.gz')
+    labels = load_label('mnist/t10k-labels-idx1-ubyte.gz')
+
+    images = images.reshape(-1, 1, 28, 28).transpose(1, 2, 3, 0) / 255
+
+    one_hot_vectors = np.zeros((10, labels.shape[0]), dtype=int)
+    one_hot_vectors[labels, np.arange(labels.shape[0])] = 1
+
+    batch_size = 16
+
+    total_correct = 0
+    total_checked = 0
+    
+    for start_index in range(0, labels.shape[0] - batch_size, batch_size):
+        batch_images = images[:, :, :, start_index:start_index + batch_size]
+        batch_one_hot_vectors = one_hot_vectors[:, start_index:start_index + batch_size]
+        batch_labels = labels[start_index:start_index + batch_size]
+
+        model.load(batch_images, batch_one_hot_vectors)
+
+        result = model.forward()
+
+        total_checked += batch_size
+        total_correct += (result.argmax(axis=0) == batch_labels).sum()
+
+        print(f'推理准确率{total_correct / total_checked}')
+
+
+reason()
