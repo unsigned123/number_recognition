@@ -29,7 +29,7 @@ class Network:
             if isinstance(layer, Layer):
                 self.processing_batch = layer.forward(self.processing_batch)
             elif isinstance(layer, LossLayer):
-                self.loss = layer.forward(self.processing_batch, self.sample_batch)
+                self.loss = layer.forward(self.processing_batch, self.one_hot_batch)
                 break
 
         self.output_batch = self.processing_batch

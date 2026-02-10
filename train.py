@@ -1,6 +1,9 @@
 from network import *
 import pickle
 from neuron import *
+import gzip
+import struct
+
 
 def new_network():
     # 创建优化器
@@ -107,15 +110,44 @@ def new_network():
 
     return model
 
+def load_dataset(filename: str):
+    data = None
+    with gzip.open(filename, 'rb') as f:
+        # 读取文件头
+        magic_number = struct.unpack('>I', f.read(4))[0]
+        num_images = struct.unpack('>I', f.read(4))[0]
+        num_rows = struct.unpack('>I', f.read(4))[0]
+        num_cols = struct.unpack('>I', f.read(4))[0]
+
+        #读取图像
+        buffer = f.read()
+        data = np.frombuffer(buffer, dtype=np.uint8)
+        data = data.reshape(num_images, num_rows, num_cols)
+
+    return data
+
+def load_label(filename: str):
+    with gzip.open(filename, 'rb') as f:
+        # 读取文件头
+        magic_number = struct.unpack('>I', f.read(4))[0]
+        num_labels = struct.unpack('>I', f.read(4))[0]
+        
+        # 读取所有标签数据
+        buffer = f.read()
+        labels = np.frombuffer(buffer, dtype=np.uint8)
+        
+    return labels
+
 if __name__ == '__main__':
     batch_size = 16
     learning_rate = 0.01
 
-    model = None
+    model: Network = None
 
     try:
         with open('model.pkl', 'rb') as f:
             model = pickle.load(f)
+            raise BaseException
         
     except:
         print('未检测到已训练模型，创建新模型')
@@ -123,3 +155,31 @@ if __name__ == '__main__':
             model = new_network()
             pickle.dump(model, f)
         
+    images = load_dataset('mnist/train-images-idx3-ubyte.gz')
+    labels = load_label('mnist/train-labels-idx1-ubyte.gz')
+
+    images = images.reshape(-1, 1, 28, 28).transpose(1, 2, 3, 0) / 255
+
+    one_hot_vectors = np.zeros((10, labels.shape[0]), dtype=int)
+    one_hot_vectors[labels, np.arange(labels.shape[0])] = 1
+
+    epoches = 10
+    try:
+        for epoch in range(epoches):
+            for start_index in range(0, labels.shape[0] - batch_size, batch_size):
+                batch_images = images[:, :, :, start_index:start_index + batch_size]
+                batch_one_hot_vectors = one_hot_vectors[:, start_index:start_index + batch_size]
+
+                model.load(batch_images, batch_one_hot_vectors)
+                model.forward()
+                model.backward()
+                model.update()
+
+                print(f'第{epoch + 1}轮的第{start_index // batch_size + 1}批，loss={model.loss}')
+    except KeyboardInterrupt:
+        with open('model.pkl', 'wb') as f:
+            pickle.dump(model, f)
+
+        print('模型成功保存')
+
+    print(f'共{epoches}轮训练完毕!目前loss={model.loss}')

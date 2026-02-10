@@ -129,7 +129,7 @@ class HiddenLayer(Layer):
         #这里对其在batch_size方向（行方向）取平均值得到平均梯度
 
         #dL_db = dL_dz
-        dL_db = np.sum(dL_dz, axis=1) / self.batch_size
+        dL_db = (np.sum(dL_dz, axis=1) / self.batch_size)[:, None]
         #dL_dW = dL_dz @ x.T，如果采用传统定义
 
         #对权重梯度
@@ -254,7 +254,7 @@ class ConvolutionLayer(Layer):
     def forward(self, input_tensor: np.typing.NDArray):
         padded_input_tensor = None
         if self.need_padding:
-            padded_input_tensor = np.pad(input_tensor, ((0, 0), (self.padding_size, self.padding_size), (self.padding_size, self.padding_size)) ,mode='constant', constant_values=0)
+            padded_input_tensor = np.pad(input_tensor, ((0, 0), (self.padding_size, self.padding_size), (self.padding_size, self.padding_size), (0, 0)) ,mode='constant', constant_values=0)
         
         self.input_tensor = input_tensor
 
@@ -282,7 +282,7 @@ class ConvolutionLayer(Layer):
         #输出形状为(output_channel, output_size, output_size, batch_size)
         convolution = np.einsum('ihwbkl,ijkl->jhwb', windows, self.kernel)
 
-        self.unactivated_output_tensor = convolution + self.biases
+        self.unactivated_output_tensor = convolution + self.biases[..., None, None]
         self.output_tensor = self.activation(self.unactivated_output_tensor)
         self.padded_input_tensor = padded_input_tensor
 
@@ -350,7 +350,7 @@ class ConvolutionLayer(Layer):
 
         #最后计算dL_dB
         #dL/dY形状为(output_channel, output_size, output_size, batch_size)
-        dL_dB = np.sum(dL_dY, axis=(1,2,3)).T / self.batch_size
+        dL_dB = (np.sum(dL_dY, axis=(1,2,3)).T / self.batch_size)[:, None]
 
         self.biases_loss_gradient = dL_dB
         self.kernel_loss_gradient = dL_dK
@@ -388,7 +388,7 @@ class FlattenLayer(Layer):
     def update(self):
         pass
     
-class PoolingLayer:
+class PoolingLayer(Layer):
     def __init__(self, channel: int, input_size: int,
                  window_size: int,
                  rule: Literal['maximum', 'average'],
@@ -397,7 +397,7 @@ class PoolingLayer:
         self.channel = channel
         self.input_size = input_size
         self.window_size = window_size
-        self.output_size = input_size / window_size
+        self.output_size = input_size // window_size
         self.rule = rule
         self.batch_size = batch_size
 
@@ -413,6 +413,7 @@ class PoolingLayer:
         windows = np.lib.stride_tricks.sliding_window_view(input_tensor, (self.window_size, self.window_size), axis=(1, 2))
 
         self.windows = windows
+
         #window大小(channel, output_size, output_size, batch_size, window_size, window_size)
         if self.rule == 'average':
             return np.copy(windows[:, ::self.window_size, ::self.window_size, :]).mean(axis=(4, 5))
@@ -434,8 +435,8 @@ class PoolingLayer:
             vertical_grid = np.arange(self.output_size)
             horizonal_grid = np.arange(self.output_size)
 
-            vertical_start = vertical_grid[:, None] * self.window_size
-            horizonal_start = horizonal_grid * self.window_size
+            vertical_start = vertical_grid[:, None, None] * self.window_size
+            horizonal_start = horizonal_grid[:, None] * self.window_size
 
             rows = vertical_start + row_in_window
             columns = horizonal_start + column_in_window
@@ -532,11 +533,12 @@ class LossLayer:
 
         self.input_vector = input_vector
         self.one_hot_vector = one_hot_vector
-        
+        print(self.input_vector.shape)
         if self.reduction == 'average':
             self.loss = np.mean(-np.sum(y * np.log(p + self.eps), axis=0))
         elif self.reduction == 'sum':
             self.loss = np.sum(-np.sum(y * np.log(p + self.eps), axis=0))
+
         return self.loss
     
     def backward(self):
