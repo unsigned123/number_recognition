@@ -533,7 +533,7 @@ class LossLayer:
 
         self.input_vector = input_vector
         self.one_hot_vector = one_hot_vector
-        print(self.input_vector.shape)
+
         if self.reduction == 'average':
             self.loss = np.mean(-np.sum(y * np.log(p + self.eps), axis=0))
         elif self.reduction == 'sum':

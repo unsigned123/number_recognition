@@ -181,5 +181,6 @@ if __name__ == '__main__':
             pickle.dump(model, f)
 
         print('模型成功保存')
+        exit(0)
 
     print(f'共{epoches}轮训练完毕!目前loss={model.loss}')
