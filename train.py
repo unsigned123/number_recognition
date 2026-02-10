@@ -167,6 +167,7 @@ def train():
     epoches = 10
     try:
         for epoch in range(epoches):
+            #loss = []
             for start_index in range(0, labels.shape[0] - batch_size, batch_size):
                 batch_images = images[:, :, :, start_index:start_index + batch_size]
                 batch_one_hot_vectors = one_hot_vectors[:, start_index:start_index + batch_size]
@@ -176,7 +177,10 @@ def train():
                 model.backward()
                 model.update()
 
+                #loss.append(model.loss)
+
                 print(f'第{epoch + 1}轮的第{start_index // batch_size + 1}批，loss={model.loss}')
+                #print(f'第{epoch + 1}轮完成，本轮loss平均为={sum(loss) / len(loss)}')
     except KeyboardInterrupt:
         with open('model.pkl', 'wb') as f:
             pickle.dump(model, f)
@@ -185,6 +189,8 @@ def train():
         exit(0)
 
     print(f'共{epoches}轮训练完毕!目前loss={model.loss}')
+    with open('model.pkl', 'wb') as f:
+            pickle.dump(model, f)
 
 def reason():
 
@@ -199,8 +205,11 @@ def reason():
             pickle.dump(model, f)
     model.layers[6].mode = 'reasoning'
 
-    images = load_dataset('mnist/t10k-images-idx3-ubyte.gz')
-    labels = load_label('mnist/t10k-labels-idx1-ubyte.gz')
+    #images = load_dataset('mnist/t10k-images-idx3-ubyte.gz')
+    #labels = load_label('mnist/t10k-labels-idx1-ubyte.gz')
+
+    images = load_dataset('mnist/train-images-idx3-ubyte.gz')
+    labels = load_label('mnist/train-labels-idx1-ubyte.gz')
 
     images = images.reshape(-1, 1, 28, 28).transpose(1, 2, 3, 0) / 255
 
@@ -227,4 +236,4 @@ def reason():
         print(f'推理准确率{total_correct / total_checked}')
 
 
-train()
+reason()
